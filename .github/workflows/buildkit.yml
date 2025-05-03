@@ -33,7 +33,6 @@ jobs:
     uses: ./.github/workflows/.dco.yml
 
   build-linux:
-    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 120 # guardrails timeout for the whole job
     needs:
@@ -61,7 +60,6 @@ jobs:
           retention-days: 1
 
   test-linux:
-    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 120 # guardrails timeout for the whole job
     needs:
@@ -121,6 +119,11 @@ jobs:
           repository: ${{ env.BUILDKIT_REPO }}
           ref: ${{ env.BUILDKIT_REF }}
           path: buildkit
+        env:
+          # to be removed once buildkit PR merged
+          # and next release tagged
+          BUILDKIT_REPO: profnandaa/buildkit
+          BUILDKIT_REF: tests-enable-dockerd-worker
       -
         name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -234,6 +237,18 @@ jobs:
               ${{ env.TEST_IMAGE_NAME }} hack\make.ps1 -Daemon -Client
           go install github.com/distribution/distribution/v3/cmd/registry@latest
 
+      - name: Checkout BuildKit
+        uses: actions/checkout@v4
+        with:
+          repository: moby/buildkit
+          ref: master
+          path: buildkit
+
+      - name: Add buildctl to binaries
+        run: |
+          go install ./cmd/buildctl
+        working-directory: buildkit
+
       - name: Copy artifacts
         run: |
           New-Item -ItemType "directory" -Path "${{ env.BIN_OUT }}"
@@ -243,6 +258,7 @@ jobs:
           docker cp "${{ env.TEST_CTN_NAME }}`:c`:\containerd\bin\containerd.exe" ${{ env.BIN_OUT }}\
           docker cp "${{ env.TEST_CTN_NAME }}`:c`:\containerd\bin\containerd-shim-runhcs-v1.exe" ${{ env.BIN_OUT }}\
           cp ${{ env.GOPATH }}\bin\registry.exe ${{ env.BIN_OUT }}
+          cp ${{ env.GOPATH }}\bin\buildctl.exe ${{ env.BIN_OUT }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -278,8 +294,6 @@ jobs:
           - ./client#3-4
           - ./client#4-4
           - ./cmd/buildctl
-          - ./worker/containerd
-          - ./solver
           - ./frontend
           - ./frontend/dockerfile#1-12
           - ./frontend/dockerfile#2-12
@@ -336,94 +350,10 @@ jobs:
           name: build-windows
           path: ${{ env.BIN_OUT }}
 
-      - name: Add buildctl to binaries
+      - name: Add binaries to PATH
         run: |
-          go install ./cmd/buildctl
-          cp ${{ env.GOPATH }}\bin\buildctl.exe ${{ env.BIN_OUT }}
-        working-directory: buildkit
-
-      - name: List artifacts
-        run: ls ${{ env.BIN_OUT }}
-
-      - name: Moby - Init
-        run: |
-          New-Item -ItemType "directory" -Path "bundles"
-          echo "WINDOWS_BASE_IMAGE_TAG=${{ env.WINDOWS_BASE_TAG_2022 }}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+          ls ${{ env.BIN_OUT }}
           Write-Output "${{ env.BIN_OUT }}" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Removing current daemon
-        run: |
-          if (Get-Service docker -ErrorAction SilentlyContinue) {
-            $dockerVersion = (docker version -f "{{.Server.Version}}")
-            Write-Host "Current installed Docker version: $dockerVersion"
-            # remove service
-            Stop-Service -Force -Name docker
-            Remove-Service -Name docker
-            # removes event log entry. we could use "Remove-EventLog -LogName -Source docker"
-            # but this cmd is not available atm
-            $ErrorActionPreference = "SilentlyContinue"
-            & reg delete "HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\docker" /f 2>&1 | Out-Null
-            $ErrorActionPreference = "Stop"
-            Write-Host "Service removed"
-          }
-
-      - name: Starting test daemon
-        run: |
-          Write-Host "Creating service"
-          $runtimeArg="--default-runtime=io.containerd.runhcs.v1"
-          echo "DOCKER_WINDOWS_CONTAINERD_RUNTIME=1" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
-          New-Item -ItemType Directory "$env:TEMP\moby-root" -ErrorAction SilentlyContinue | Out-Null
-          New-Item -ItemType Directory "$env:TEMP\moby-exec" -ErrorAction SilentlyContinue | Out-Null
-          Start-Process -Wait -NoNewWindow "${{ env.BIN_OUT }}\dockerd" `
-            -ArgumentList $runtimeArg, "--debug", `
-              "--host=npipe:////./pipe/docker_engine", `
-              "--data-root=$env:TEMP\moby-root", `
-              "--exec-root=$env:TEMP\moby-exec", `
-              "--pidfile=$env:TEMP\docker.pid", `
-              "--register-service"
-          # Make the env-var visible to the service-managed dockerd, as there's no CLI flag for this option.
-          & reg add "HKLM\SYSTEM\CurrentControlSet\Services\docker" /v Environment /t REG_MULTI_SZ /s '@' /d TEST_INTEGRATION_USE_SNAPSHOTTER=1 
-          echo "TEST_INTEGRATION_USE_SNAPSHOTTER=1" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
-          Write-Host "Starting service"
-          Start-Service -Name docker
-          Write-Host "Service started successfully!"
-
-      - name: Waiting for test daemon to start
-        run: |
-          $tries=20
-          Write-Host "Waiting for the test daemon to start..."
-          While ($true) {
-            $ErrorActionPreference = "SilentlyContinue"
-            & "${{ env.BIN_OUT }}\docker" version
-            $ErrorActionPreference = "Stop"
-            If ($LastExitCode -eq 0) {
-              break
-            }
-            $tries--
-            If ($tries -le 0) {
-              Throw "Failed to get a response from the daemon"
-            }
-            Write-Host -NoNewline "."
-            Start-Sleep -Seconds 1
-          }
-          Write-Host "Test daemon started and replied!"
-          $containerdProcesses = Get-Process -Name containerd -ErrorAction:SilentlyContinue
-          If (-not $containerdProcesses) {
-            Throw "containerd process is not running"
-          } else {
-            foreach ($process in $containerdProcesses) {
-              $processPath = (Get-Process -Id $process.Id -FileVersionInfo).FileName
-              Write-Output "Running containerd instance binary Path: $($processPath)"
-            }
-          }
-        env:
-          DOCKER_HOST: npipe:////./pipe/docker_engine
-
-      - name: Docker info
-        run: |
-          & "${{ env.BIN_OUT }}\docker" info
-        env:
-          DOCKER_HOST: npipe:////./pipe/docker_engine
 
       - name: Test Prep
         shell: bash
