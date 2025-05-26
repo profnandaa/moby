@@ -288,18 +288,26 @@ jobs:
           - ./client#4-4
           - ./cmd/buildctl
           - ./frontend
-          - ./frontend/dockerfile#1-12
-          - ./frontend/dockerfile#2-12
-          - ./frontend/dockerfile#3-12
-          - ./frontend/dockerfile#4-12
-          - ./frontend/dockerfile#5-12
-          - ./frontend/dockerfile#6-12
-          - ./frontend/dockerfile#7-12
-          - ./frontend/dockerfile#8-12
-          - ./frontend/dockerfile#9-12
-          - ./frontend/dockerfile#10-12
-          - ./frontend/dockerfile#11-12
-          - ./frontend/dockerfile#12-12
+          - ./frontend/dockerfile#1-20
+          - ./frontend/dockerfile#2-20
+          - ./frontend/dockerfile#3-20
+          - ./frontend/dockerfile#4-20
+          - ./frontend/dockerfile#5-20
+          - ./frontend/dockerfile#6-20
+          - ./frontend/dockerfile#7-20
+          - ./frontend/dockerfile#8-20
+          - ./frontend/dockerfile#9-20
+          - ./frontend/dockerfile#10-20
+          - ./frontend/dockerfile#11-20
+          - ./frontend/dockerfile#12-20
+          - ./frontend/dockerfile#13-20
+          - ./frontend/dockerfile#14-20
+          - ./frontend/dockerfile#15-20
+          - ./frontend/dockerfile#16-20
+          - ./frontend/dockerfile#17-20
+          - ./frontend/dockerfile#18-20
+          - ./frontend/dockerfile#19-20
+          - ./frontend/dockerfile#20-20
     steps:
       - name: Prepare
         shell: bash
